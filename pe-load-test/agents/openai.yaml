@@ -1,0 +1,4 @@
+interface:
+  display_name: "PE Two-Pod Load Test"
+  short_description: "Swap PE binary and run two-pod load tests"
+  default_prompt: "Use $policy-engine-two-pod-loadtest to deploy a PE binary to a target pod and run parameterized vegeta load from a client pod."
