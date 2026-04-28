@@ -114,6 +114,13 @@ log "Restarting Policy Engine using: $RESTART_CMD"
 k exec "$POD" -- sh -lc "$RESTART_CMD"
 
 resolve_target_ip() {
+  local pod_ip=""
+  pod_ip="$(k get pod "$POD" -o jsonpath='{.status.podIP}' 2>/dev/null || true)"
+  if [[ -n "$pod_ip" ]]; then
+    printf '%s\n' "$pod_ip"
+    return 0
+  fi
+  # Fallback for cases where podIP is unavailable in status.
   k exec "$POD" -- sh -lc "ip -4 -o addr show dev '$INTERFACE' | tr -s ' ' | cut -d' ' -f4 | cut -d/ -f1 | head -n1"
 }
 

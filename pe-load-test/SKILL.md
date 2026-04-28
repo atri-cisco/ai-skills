@@ -29,6 +29,11 @@ description: Use when you need to swap a Policy Engine binary in one pod and dri
 Note:
 - Some PE pods bind service listeners on pod IP (eth0) rather than `127.0.0.1`.
 - For profiling/metrics collection, prefer `kubectl exec ... curl https://<pod-ip>:<port>/...` over `kubectl port-forward` to localhost.
+- PE readiness is slow enough that it must be treated as part of the test procedure:
+  - After an in-place `policy_engine` restart, expect `5-8+` minutes before PE is fully healthy again and serving `/status`.
+  - A freshly created PE pod can take `20+` minutes on first boot before all pref/policy data finishes loading.
+  - Do not start load, restore the binary, or declare the swap failed until PE has returned to a genuinely healthy state.
+  - Use both pod readiness and a real PE health check such as `https://<pod-ip>/status`; Envoy being up alone is not enough.
 
 ## Scripts in this skill
 - `scripts/pe_target_setup.sh`
@@ -36,6 +41,7 @@ Note:
   - Saves backup as `/opt/policy_engine/bin/policy_engine.<timestamp-or-suffix>`.
   - Restarts PE with `svc -du /service/policy_engine`.
   - Waits for readiness using HTTP probe by default (`https://<pod-eth0-ip>/status`, fallback `http://...`).
+  - Important: PE restart is known to be slow. In practice, budget `5-8+` minutes after a binary swap and much longer for a first pod boot.
   - Supports log-based readiness when needed via `--ready-mode log --ready-pattern "<pattern>"`.
   - Disables debug logs via PATCH on target pod IP (`eth0` by default).
   - Important: after every binary swap/restart, confirm debug stays off (`verbose=false`) before load.
@@ -124,6 +130,9 @@ cd /Users/ratri/.codex/skills/policy-engine-two-pod-loadtest
 - `--workers`/`--max-workers`: start with defaults; raise if you observe client-side saturation.
 - `--max-workers`: only effective when vegeta binary supports the flag; script auto-falls back otherwise.
 - `--ready-timeout-sec`: increase to `1200+` if PE startup regularly exceeds 15 minutes.
+- Do not assume a restart failure before waiting out the normal PE load window:
+  - In-place service restart: typically `5-8+` minutes.
+  - Fresh pod first boot: often `20+` minutes.
 
 ## Safety checks
 - Do not run binary swaps on production pods unless explicitly intended.

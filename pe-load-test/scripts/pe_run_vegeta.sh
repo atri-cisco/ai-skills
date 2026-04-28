@@ -152,16 +152,30 @@ fi
 cleanup_remote_vegeta() {
   # Best-effort cleanup for interrupted local runs.
   k exec "$CLIENT_POD" -- sh -lc "
-    if command -v killall >/dev/null 2>&1; then
-      killall vegeta >/dev/null 2>&1 || true
-    elif command -v pkill >/dev/null 2>&1; then
-      pkill -f 'vegeta attack' >/dev/null 2>&1 || true
-      pkill -f 'vegeta report' >/dev/null 2>&1 || true
+    pids=\$(ps -eo pid,args | awk '/vegeta attack|vegeta report/ && !/awk/ && !/pgrep/ {print \$1}')
+    if [ -n \"\$pids\" ]; then
+      kill \$pids >/dev/null 2>&1 || true
+      sleep 1
+      kill -9 \$pids >/dev/null 2>&1 || true
     fi
   " >/dev/null 2>&1 || true
 }
 
+remote_has_vegeta_processes() {
+  k exec "$CLIENT_POD" -- sh -lc "ps -eo pid,args | awk '/vegeta attack|vegeta report/ && !/awk/ && !/pgrep/ {found=1} END {exit(found?0:1)}'" >/dev/null 2>&1
+}
+
+RUN_ACTIVE=false
+on_exit() {
+  local rc=$?
+  if [[ $rc -ne 0 && "$RUN_ACTIVE" == "true" ]]; then
+    log "Run failed (exit ${rc}). Cleaning up remote vegeta processes."
+    cleanup_remote_vegeta
+  fi
+}
+
 trap 'log "Interrupted. Cleaning up remote vegeta processes."; cleanup_remote_vegeta; exit 130' INT TERM
+trap on_exit EXIT
 
 INSECURE_FLAG=""
 if [[ "$INSECURE" == "true" ]]; then
@@ -187,6 +201,18 @@ if k exec "$CLIENT_POD" -- sh -lc "grep -q '127.0.0.1:8080' '$TARGETS_REMOTE'"; 
   exit 1
 fi
 
+if remote_has_vegeta_processes; then
+  log "Found existing vegeta processes on client pod. Cleaning up stale processes first."
+  cleanup_remote_vegeta
+  sleep 1
+fi
+
+if remote_has_vegeta_processes; then
+  echo "Existing vegeta processes are still running on client pod; aborting to avoid mixed runs." >&2
+  exit 1
+fi
+
+RUN_ACTIVE=true
 k exec "$CLIENT_POD" -- sh -lc "
   set -eu
   mkdir -p '$REMOTE_OUT_DIR'
@@ -227,6 +253,7 @@ k exec "$CLIENT_POD" -- sh -lc "
   vegeta report -type='hist[0,2ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s]' \
     < '$REMOTE_OUT_DIR/results.bin' > '$REMOTE_OUT_DIR/hist.txt'
 "
+RUN_ACTIVE=false
 
 log "Run complete. Key files in pod:"
 log "  $REMOTE_OUT_DIR/report.txt"
